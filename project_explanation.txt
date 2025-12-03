@@ -1,0 +1,85 @@
+AML Graph Engine (MVP) — Plain-English Explanation
+
+What this project is
+- A simplified, class-friendly demo that models bank transactions as a live graph and flags suspicious rapid “ping‑pong” transfers between two accounts.
+- It continuously streams synthetic transactions, updates the graph, runs one detector on recent activity, and shows alerts and a simple visualization.
+
+Why it’s useful (for class)
+- Demonstrates core OOP concepts, event-driven design, basic concurrency, and a straightforward Swing UI.
+- Keeps the idea of real-time detection without advanced complexity.
+
+Key components and roles
+
+- DynamicGraph: in-memory graph; adds transactions, keeps nodes/edges, notifies detectors and UI listeners.
+  - Reference: src/main/java/com/oops/aml/engine/DynamicGraph.java:12
+- AccountNode: a bank account node with a bounded risk score and adjacency lists.
+  - Reference: src/main/java/com/oops/aml/engine/AccountNode.java:1
+- TransactionEdge: a directed edge (sender → receiver) with amount and timestamp.
+  - Reference: src/main/java/com/oops/aml/engine/TransactionEdge.java:1
+- GraphObserver (interface): detectors implement this and react when a new transaction is added.
+  - Reference: src/main/java/com/oops/aml/engine/GraphObserver.java:3
+- RapidTransactionDetector: the single MVP detector that looks for rapid bidirectional transfers (A→B and B→A) within a time window and emits alerts.
+  - Reference: src/main/java/com/oops/aml/observers/RapidTransactionDetector.java:1
+- Alert/AlertSink: a basic alert model and sink interface; the UI implements the sink to display alerts.
+  - Reference: src/main/java/com/oops/aml/engine/alerts/Alert.java:1, src/main/java/com/oops/aml/engine/alerts/AlertSink.java:3
+- TransactionStreamSimulator: generates synthetic transactions on a schedule; calls graph.addTransaction.
+  - Reference: src/main/java/com/oops/aml/stream/TransactionStreamSimulator.java:1
+
+- Swing UI panels:
+  - App: main class; builds a JFrame and adds panels.
+    - Reference: src/main/java/com/oops/aml/ui/App.java:1
+  - GraphView: custom painting of nodes (colored by risk) and edges (thickness by amount).
+    - Reference: src/main/java/com/oops/aml/ui/GraphView.java:1
+  - AlertsPanel: a JList showing new alerts.
+    - Reference: src/main/java/com/oops/aml/ui/AlertsPanel.java:1
+  - ControlsPane: start/stop simulator; toggle detector checkbox.
+    - Reference: src/main/java/com/oops/aml/ui/ControlsPane.java:1
+  - StatsPane: node/edge counters updated by a Swing timer.
+    - Reference: src/main/java/com/oops/aml/ui/StatsPane.java:1
+
+Data flow (lifecycle)
+
+- The simulator chooses two account IDs and an amount, then calls DynamicGraph.addTransaction(from, to, amount).
+- The graph adds an edge, updates the involved nodes’ risk slightly, and notifies all GraphObserver detectors.
+- The RapidTransactionDetector scans recent edges within a time window; if both directions meet a threshold and minimum amount, it emits an alert via DynamicGraph.emitAlert.
+- The AlertsPanel (as AlertSink) appends the alert to the list; the GraphView repaints to reflect any risk color changes.
+
+Detector rule (MVP)
+- Window: e.g., 10 minutes.
+- Burst threshold: e.g., at least 2 A→B and 2 B→A within the window.
+- Minimum amount: filters out tiny transfers.
+- On trigger: raise a small risk on both accounts and emit an alert.
+
+Concurrency and UI updates
+- Streaming cadence: TransactionStreamSimulator uses a scheduled executor to generate transactions at fixed intervals.
+- UI thread: Swing uses the EDT; panels update via SwingUtilities.invokeLater and repaint.
+- Stats: a Swing Timer (every 1s) reads counts and updates labels.
+
+Visualization
+- Nodes placed around a circle for simple, deterministic positioning.
+- Node color maps risk (green → red); edges use thicker strokes for larger amounts.
+- Labels show node IDs; rendering is optimized for clarity over visual complexity.
+
+How to build and run
+- Build: .\tools\maven\apache-maven-3.9.6\bin\mvn.cmd -q -DskipTests package
+- Run: java -cp target/classes com.oops.aml.ui.App
+- In the window: click “Start Simulator” to begin, toggle “Enable rapid tx detector” as desired, and observe alerts and the graph.
+
+What was simplified
+- Removed advanced detectors (cycles, novelty) and adaptive pattern repository.
+- Removed external UI libraries; UI is pure Swing.
+- Kept the fundamental streaming+detector+alert pipeline while minimizing moving parts.
+
+Extending later (optional)
+- Add a simple cycle detector (length-3 triangle) using recent edges.
+- Add CSV playback for real datasets without changing the UI.
+- Make detector thresholds adjustable via UI controls (sliders/spinners).
+
+File structure (key parts)
+- Engine: AccountNode, TransactionEdge, DynamicGraph
+- Observers: GraphObserver, RapidTransactionDetector
+- Stream: TransactionStreamSimulator
+- UI: App (frame), GraphView, AlertsPanel, ControlsPane, StatsPane
+
+Summary
+- A clear, minimal real-time graph MVP: synthetic transactions → dynamic graph → one detector → alerts + visualization, suitable for learning and presentation.

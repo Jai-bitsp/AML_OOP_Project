@@ -1,0 +1,359 @@
+Adaptive Dynamic Graph Engine for Real-Time Money Laundering Detection (Gaps 3,5,8)
+Why It’s Novel
+Most AML graph analytics treat the network as static,  they load all transactions into a database, then run periodic queries for suspicious structures (rings, hubs, layered paths, etc.).
+
+
+This project instead builds a dynamic, real-time evolving graph model that updates as transactions stream in, allowing immediate anomaly detection and adaptive learning from new patterns.
+In short:
+You’re creating a modular, object-oriented graph intelligence engine that “grows” and “learns” in real time to detect emerging laundering rings and anomalies.
+
+Core Idea
+Build an OOP-based framework that models:
+Accounts and transactions as a dynamic graph (nodes and edges that change over time).
+
+
+Observers (detectors) that watch the graph in real-time and react when suspicious substructures form.
+
+
+Adaptive learning modules that detect new, previously unseen laundering patterns by comparing new subgraphs to known ones.
+
+
+
+Gap Addressed
+Gap
+How This Project Solves It
+Gap 5: Static Graph Analysis
+Uses a dynamic, in-memory graph that updates with every transaction event instead of batch analytics.
+Gap 3: Lack of Real-Time Detection
+Implements a streaming event pipeline where each new transaction triggers immediate analysis.
+Gap 8: Difficulty Detecting Novel Patterns
+Incorporates adaptive graph comparison using pattern fingerprints and anomaly scores.
+
+
+OOP Design
+1. Core Classes
+AccountNode
+Represents an account.
+ Encapsulates identity, risk score, and transaction relationships.
+class AccountNode {
+    private String id;
+    private double riskScore;
+    private List<TransactionEdge> outgoingEdges;
+    private List<TransactionEdge> incomingEdges;
+
+    public void updateRisk(double delta);
+    public List<AccountNode> getConnections();
+}
+
+
+TransactionEdge
+Represents a transfer between two accounts.
+class TransactionEdge {
+    private AccountNode sender;
+    private AccountNode receiver;
+    private double amount;
+    private LocalDateTime timestamp;
+}
+
+
+DynamicGraph
+Maintains live network structure.
+ Supports addition/removal of nodes and edges as transactions arrive.
+class DynamicGraph {
+    private Map<String, AccountNode> nodes;
+    private List<TransactionEdge> edges;
+    private List<GraphObserver> observers;
+
+    public void addTransaction(String fromId, String toId, double amount);
+    public void registerObserver(GraphObserver observer);
+    public void notifyObservers(TransactionEdge edge);
+}
+
+
+GraphObserver (Interface)
+Abstract interface for detectors that monitor the graph.
+interface GraphObserver {
+    void onTransactionAdded(TransactionEdge edge, DynamicGraph graph);
+}
+
+
+Concrete Observers
+Each one specializes in detecting certain suspicious structures.
+CircularFlowDetector → Detects rings (A→B→C→A).
+
+
+RapidTransactionDetector → Flags frequent back-and-forth transfers.
+
+
+NewPatternDetector → Learns structural fingerprints of normal activity and flags deviations.
+
+
+class CircularFlowDetector implements GraphObserver {
+    public void onTransactionAdded(TransactionEdge edge, DynamicGraph graph) {
+        // Use DFS within last N transactions to detect new cycles
+    }
+}
+
+
+PatternRepository
+Stores and retrieves known laundering or normal patterns.
+class PatternRepository {
+    private List<SubgraphPattern> knownPatterns;
+    public double compare(SubgraphPattern newPattern);
+}
+
+
+TransactionStreamSimulator
+Simulates incoming real-time transactions.
+class TransactionStreamSimulator implements Runnable {
+    private DynamicGraph graph;
+    public void run() {
+        while (true) {
+            graph.addTransaction(randomAccount(), randomAccount(), randomAmount());
+            Thread.sleep(500); // simulate live feed
+        }
+    }
+}
+
+
+
+Concept: NewPatternDetector
+This detector is designed to learn what “normal” transaction subgraphs look like — and then flag new, unseen structural patterns that deviate significantly.
+It doesn’t need a full ML backend at first. The idea is to implement a lightweight pattern-fingerprinting system that tracks small subgraph “signatures” and uses statistical comparison to find anomalies.
+
+Step-by-Step Logic
+1. Subgraph Fingerprinting
+Every time a transaction occurs, the detector captures a local subgraph (e.g., 2 hops from the source node).
+ It summarizes it into a pattern fingerprint, which could include:
+Number of unique nodes in the neighborhood
+
+
+Ratio of in-degree/out-degree
+
+
+Average transaction amount
+
+
+Recurrence of the same connections
+
+
+Temporal density (transactions per time window)
+
+
+So, a fingerprint is a compact feature vector that represents how that part of the graph “behaves.”
+
+2. Normal Pattern Repository
+When the program runs for the first few hundred transactions, these fingerprints are stored in the PatternRepository as examples of normal activity.
+ As the system matures, new fingerprints are compared to stored ones.
+
+3. Deviation Detection
+When a new fingerprint arrives, the system calculates its similarity score against known ones (e.g., cosine similarity, Euclidean distance).
+ If the similarity score falls below a threshold → flag as potentially novel (suspicious).
+
+4. Adaptive Learning
+If the alert turns out to be benign, the fingerprint can be added to the repository — allowing the detector to learn and evolve without manual rule updates.
+
+Class Implementation Sketch
+Here’s what the simplified OOP design looks like.
+class NewPatternDetector implements GraphObserver {
+    private PatternRepository repository;
+    private static final double ANOMALY_THRESHOLD = 0.75; // similarity threshold
+
+    public NewPatternDetector(PatternRepository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    public void onTransactionAdded(TransactionEdge edge, DynamicGraph graph) {
+        // Extract local subgraph (e.g., 2-hop neighborhood around sender)
+        SubgraphPattern currentPattern = extractSubgraphPattern(edge, graph);
+
+        // Compare to known patterns
+        double similarity = repository.compare(currentPattern);
+
+        if (similarity < ANOMALY_THRESHOLD) {
+            System.out.println("[ALERT] Novel pattern detected near account " 
+                               + edge.getSender().getId() + " (similarity=" + similarity + ")");
+            edge.getSender().updateRisk(0.2);
+        } else {
+            repository.addPattern(currentPattern); // reinforce normalcy
+        }
+    }
+
+    private SubgraphPattern extractSubgraphPattern(TransactionEdge edge, DynamicGraph graph) {
+        AccountNode sender = edge.getSender();
+        List<AccountNode> neighbors = sender.getConnections();
+
+        int degree = neighbors.size();
+        double avgAmount = sender.getOutgoingEdges().stream()
+                                 .mapToDouble(TransactionEdge::getAmount)
+                                 .average()
+                                 .orElse(0.0);
+        double timeDensity = sender.getOutgoingEdges().stream()
+                                   .filter(e -> e.getTimestamp().isAfter(LocalDateTime.now().minusMinutes(10)))
+                                   .count();
+
+        return new SubgraphPattern(degree, avgAmount, timeDensity);
+    }
+}
+
+
+Supporting Classes
+SubgraphPattern
+Encapsulates the structural “fingerprint.”
+class SubgraphPattern {
+    private int degree;
+    private double avgAmount;
+    private double timeDensity;
+
+    public SubgraphPattern(int degree, double avgAmount, double timeDensity) {
+        this.degree = degree;
+        this.avgAmount = avgAmount;
+        this.timeDensity = timeDensity;
+    }
+
+    public double similarity(SubgraphPattern other) {
+        // Simple normalized distance (could use cosine similarity)
+        double degreeDiff = Math.abs(this.degree - other.degree) / (double)(this.degree + other.degree + 1);
+        double amountDiff = Math.abs(this.avgAmount - other.avgAmount) / (this.avgAmount + other.avgAmount + 1);
+        double timeDiff = Math.abs(this.timeDensity - other.timeDensity) / (this.timeDensity + other.timeDensity + 1);
+
+        return 1 - (degreeDiff + amountDiff + timeDiff) / 3.0;
+    }
+}
+
+
+PatternRepository
+class PatternRepository {
+    private List<SubgraphPattern> knownPatterns = new ArrayList<>();
+
+    public void addPattern(SubgraphPattern pattern) {
+        knownPatterns.add(pattern);
+    }
+
+    public double compare(SubgraphPattern newPattern) {
+        if (knownPatterns.isEmpty()) return 1.0; // nothing to compare yet
+
+        double maxSim = 0.0;
+        for (SubgraphPattern p : knownPatterns) {
+            maxSim = Math.max(maxSim, p.similarity(newPattern));
+        }
+        return maxSim;
+    }
+}
+
+
+What Makes This “Adaptive”
+It learns incrementally from the live stream (repository grows automatically).
+
+
+It’s model-agnostic — doesn’t need labeled data.
+
+
+Over time, it forms a probabilistic model of “normalcy” without heavy ML infrastructure.
+
+
+You can later integrate a proper clustering model (like DBSCAN or IsolationForest) around these fingerprints for research-level enhancement.
+
+
+
+Console Output Example
+[INFO] Added transaction: D -> E ($1800)
+[ALERT] Novel pattern detected near account D (similarity=0.63)
+[INFO] Updated risk score: D=0.91
+
+
+
+MVP (Minimum Viable Product)
+Goal
+Demonstrate a live updating AML network that:
+Reads or simulates incoming transactions.
+
+
+Builds the graph dynamically.
+
+
+Detects rings and repetitive high-value flows instantly.
+
+
+Prints real-time alerts to the console.
+
+
+
+MVP Steps
+Graph Setup
+
+
+Implement AccountNode, TransactionEdge, and DynamicGraph classes.
+
+
+Add ability to add/remove transactions dynamically.
+
+
+Add Observers
+
+
+Create GraphObserver interface.
+
+
+Implement CircularFlowDetector and RapidTransactionDetector.
+
+
+Simulate Live Stream
+
+
+Write TransactionStreamSimulator to add transactions every second.
+
+
+Detection Logic
+
+
+Each new transaction triggers observers.
+
+
+Observers analyze recent edges for cycles or anomalies.
+
+
+Console Alerts
+
+
+When a pattern is found, log:
+
+ [ALERT] Circular Flow Detected: A -> B -> C -> A | Total: $15,000
+
+
+Optional: Update risk score for involved accounts.
+
+
+
+Possible Console Output
+[INFO] Added transaction: A -> B ($2000)
+[INFO] Added transaction: B -> C ($2000)
+[ALERT] Circular Flow Detected: A -> B -> C -> A | Total: $6000
+[INFO] Updated risk score: A=0.82, B=0.80, C=0.79
+
+
+Future Extensions (to make it research-grade)
+Integration with ML
+
+
+Use a small ML model (e.g., clustering) to learn new suspicious subgraph shapes over time.
+
+
+Persistence Layer
+
+
+Periodically store graph snapshots for time-series analysis.
+
+
+Visualization
+
+
+Integrate with a lightweight JavaFX dashboard or GraphStream to show the live-evolving network.
+
+
+Pattern Fingerprinting
+
+
+Implement SubgraphPattern objects that capture structure + statistics of detected rings.
+

@@ -1,0 +1,688 @@
+===== Class: App.java =====
+package com.oops.aml.ui;
+
+import com.oops.aml.engine.DynamicGraph;
+import com.oops.aml.stream.TransactionStreamSimulator;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class App {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            DynamicGraph graph = new DynamicGraph();
+            AlertsPanel alerts = new AlertsPanel();
+            graph.setAlertSink(alerts);
+
+            GraphView graphView = new GraphView(graph);
+            TransactionStreamSimulator simulator = new TransactionStreamSimulator(graph, 50);
+            ControlsPane controls = new ControlsPane(graph, simulator);
+            StatsPane stats = new StatsPane(graph);
+
+            JFrame frame = new JFrame("AML Graph Engine (MVP)");
+            frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+            frame.setLayout(new BorderLayout());
+            frame.add(graphView, BorderLayout.CENTER);
+            frame.add(alerts, BorderLayout.EAST);
+            frame.add(controls, BorderLayout.SOUTH);
+            frame.add(stats, BorderLayout.WEST);
+            frame.setSize(1200, 800);
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
+        });
+    }
+}
+
+===== Class: StatsPane.java =====
+package com.oops.aml.ui;
+
+import com.oops.aml.engine.DynamicGraph;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class StatsPane extends JPanel {
+    private final DynamicGraph graph;
+    private final JLabel nodes = new JLabel("Nodes: 0");
+    private final JLabel edges = new JLabel("Edges: 0");
+
+    public StatsPane(DynamicGraph graph) {
+        this.graph = graph;
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        add(new JLabel("Stats"));
+        add(nodes);
+        add(edges);
+
+        new javax.swing.Timer(1000, e -> refresh()).start();
+    }
+
+    private void refresh() {
+        nodes.setText("Nodes: " + graph.getNodes().size());
+        edges.setText("Edges: " + graph.getEdges().size());
+    }
+}
+
+===== Class: ControlsPane.java =====
+package com.oops.aml.ui;
+
+import com.oops.aml.engine.DynamicGraph;
+import com.oops.aml.observers.RapidTransactionDetector;
+import com.oops.aml.stream.TransactionStreamSimulator;
+
+import javax.swing.*;
+import java.awt.*;
+import java.time.Duration;
+
+public class ControlsPane extends JPanel {
+    private final DynamicGraph graph;
+    private final TransactionStreamSimulator simulator;
+
+    private RapidTransactionDetector rapidDetector;
+
+    public ControlsPane(DynamicGraph graph, TransactionStreamSimulator simulator) {
+        this.graph = graph;
+        this.simulator = simulator;
+        build();
+    }
+
+    private void build() {
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        JLabel title = new JLabel("Controls");
+        JButton start = new JButton("Start Simulator");
+        JButton stop = new JButton("Stop Simulator");
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        buttons.add(start);
+        buttons.add(stop);
+
+        JCheckBox cbRapid = new JCheckBox("Enable rapid tx detector", true);
+
+        start.addActionListener(e -> simulator.start(500));
+        stop.addActionListener(e -> simulator.stop());
+
+        cbRapid.addChangeListener(e -> {
+            boolean enabled = cbRapid.isSelected();
+            if (enabled) {
+                rapidDetector = new RapidTransactionDetector(Duration.ofMinutes(10), 2, 500.0);
+                graph.registerObserver(rapidDetector);
+            } else if (rapidDetector != null) {
+                graph.unregisterObserver(rapidDetector);
+            }
+        });
+
+        add(title);
+        add(buttons);
+        add(new JLabel("Detector"));
+        add(cbRapid);
+    }
+}
+
+===== Class: GraphView.java =====
+package com.oops.aml.ui;
+
+import com.oops.aml.engine.AccountNode;
+import com.oops.aml.engine.DynamicGraph;
+import com.oops.aml.engine.TransactionEdge;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.geom.Ellipse2D;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+public class GraphView extends JPanel implements DynamicGraph.OnEdgeAddedListener {
+    private final DynamicGraph graph;
+
+    public GraphView(DynamicGraph graph) {
+        this.graph = graph;
+        setPreferredSize(new Dimension(800, 600));
+        graph.addEdgeListener(this);
+    }
+
+    @Override
+    public void edgeAdded(TransactionEdge edge) {
+        SwingUtilities.invokeLater(this::repaint);
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        List<AccountNode> nodes = new ArrayList<>(graph.getNodes());
+        nodes.sort(Comparator.comparing(AccountNode::getId));
+        int n = nodes.size();
+        int w = getWidth();
+        int h = getHeight();
+        int cx = w / 2;
+        int cy = h / 2;
+        int radius = Math.min(w, h) / 2 - 60;
+
+        // Compute positions on a circle
+        Point[] pos = new Point[n];
+        for (int i = 0; i < n; i++) {
+            double angle = 2 * Math.PI * i / Math.max(n, 1);
+            int x = cx + (int) (radius * Math.cos(angle));
+            int y = cy + (int) (radius * Math.sin(angle));
+            pos[i] = new Point(x, y);
+        }
+
+        // Map id -> index
+        java.util.Map<String, Integer> index = new java.util.HashMap<>();
+        for (int i = 0; i < n; i++) index.put(nodes.get(i).getId(), i);
+
+        // Draw edges
+        for (TransactionEdge e : graph.getEdges()) {
+            Integer si = index.get(e.getSender().getId());
+            Integer ti = index.get(e.getReceiver().getId());
+            if (si == null || ti == null) continue;
+            Point sp = pos[si];
+            Point tp = pos[ti];
+            float thickness = (float) Math.min(5.0, 1.0 + e.getAmount() / 5000.0);
+            g2.setStroke(new BasicStroke(thickness));
+            g2.setColor(new Color(0x90, 0xa4, 0xae));
+            g2.drawLine(sp.x, sp.y, tp.x, tp.y);
+        }
+
+        // Draw nodes
+        for (int i = 0; i < n; i++) {
+            AccountNode node = nodes.get(i);
+            Point p = pos[i];
+            int size = 16;
+            Ellipse2D.Double circle = new Ellipse2D.Double(p.x - size / 2.0, p.y - size / 2.0, size, size);
+            Color c = toRiskColor(node.getRiskScore());
+            g2.setColor(c);
+            g2.fill(circle);
+            g2.setColor(new Color(0x33, 0x33, 0x33));
+            g2.draw(circle);
+            g2.setColor(Color.DARK_GRAY);
+            g2.drawString(node.getId(), p.x + 6, p.y - 6);
+        }
+
+        g2.dispose();
+    }
+
+    private Color toRiskColor(double risk) {
+        int r = (int) (0x66 + (0xe5 - 0x66) * risk);
+        int g = (int) (0xbb - (0xbb - 0x39) * risk);
+        int b = (int) (0x6a - (0x6a - 0x35) * risk);
+        return new Color(r, g, b);
+    }
+}
+
+===== Class: AlertsPanel.java =====
+package com.oops.aml.ui;
+
+import com.oops.aml.engine.alerts.Alert;
+import com.oops.aml.engine.alerts.AlertSink;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class AlertsPanel extends JPanel implements AlertSink {
+    private final DefaultListModel<String> model = new DefaultListModel<>();
+    private final JList<String> list = new JList<>(model);
+
+    public AlertsPanel() {
+        setLayout(new BorderLayout(8, 8));
+        add(new JLabel("Alerts"), BorderLayout.NORTH);
+        add(new JScrollPane(list), BorderLayout.CENTER);
+        setPreferredSize(new Dimension(320, 0));
+    }
+
+    @Override
+    public void emit(Alert alert) {
+        SwingUtilities.invokeLater(() -> {
+            String entry = String.format("[%s] %s | sev=%.2f", alert.getType(), alert.getMessage(), alert.getSeverity());
+            model.addElement(entry);
+            list.ensureIndexIsVisible(model.size() - 1);
+        });
+    }
+}
+
+===== Class: TransactionStreamSimulator.java =====
+package com.oops.aml.stream;
+
+import com.oops.aml.engine.DynamicGraph;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+public class TransactionStreamSimulator {
+    private final DynamicGraph graph;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final Random random = new Random();
+    private final List<String> accounts = new ArrayList<>();
+
+    private volatile boolean running = false;
+
+    public TransactionStreamSimulator(DynamicGraph graph, int accountCount) {
+        this.graph = graph;
+        for (int i = 0; i < accountCount; i++) {
+            accounts.add("A" + (1000 + i));
+        }
+    }
+
+    public void start(long periodMs) {
+        if (running) return;
+        running = true;
+        scheduler.scheduleAtFixedRate(this::tick, 0, periodMs, TimeUnit.MILLISECONDS);
+    }
+
+    public void stop() {
+        running = false;
+        scheduler.shutdownNow();
+    }
+
+    private void tick() {
+        if (!running) return;
+        String from = pickAccount();
+        String to = pickAccountDifferent(from);
+        double amount = 100 + random.nextDouble() * 4900; // 100-5000
+        graph.addTransaction(from, to, amount);
+
+        // Occasionally inject ring pattern A->B->C->A
+        if (random.nextDouble() < 0.03) {
+            String a = pickAccount();
+            String b = pickAccountDifferent(a);
+            String c = pickAccountDifferent(b);
+            double amt = 500 + random.nextDouble() * 3000;
+            graph.addTransaction(a, b, amt);
+            graph.addTransaction(b, c, amt);
+            graph.addTransaction(c, a, amt);
+        }
+
+        // Occasionally inject ping-pong
+        if (random.nextDouble() < 0.05) {
+            String a = pickAccount();
+            String b = pickAccountDifferent(a);
+            double amt = 800 + random.nextDouble() * 2000;
+            for (int i = 0; i < 3; i++) {
+                graph.addTransaction(a, b, amt);
+                graph.addTransaction(b, a, amt);
+            }
+        }
+    }
+
+    private String pickAccount() {
+        return accounts.get(random.nextInt(accounts.size()));
+    }
+
+    private String pickAccountDifferent(String other) {
+        String candidate;
+        do {
+            candidate = pickAccount();
+        } while (candidate.equals(other));
+        return candidate;
+    }
+}
+
+===== Class: RapidTransactionDetector.java =====
+package com.oops.aml.observers;
+
+import com.oops.aml.engine.*;
+import com.oops.aml.engine.alerts.AlertType;
+
+import java.time.Duration;
+import java.util.List;
+
+public class RapidTransactionDetector implements GraphObserver {
+    private final Duration window;
+    private final int burstCount;
+    private final double minAmount;
+
+    public RapidTransactionDetector(Duration window, int burstCount, double minAmount) {
+        this.window = window;
+        this.burstCount = burstCount;
+        this.minAmount = minAmount;
+    }
+
+    @Override
+    public void onTransactionAdded(TransactionEdge edge, DynamicGraph graph) {
+        // Ping-pong detection: A->B and B->A within window
+        List<TransactionEdge> recent = graph.getRecentEdges(window);
+        int abCount = 0;
+        int baCount = 0;
+        for (TransactionEdge e : recent) {
+            if (e.getAmount() < minAmount) continue;
+            if (e.getSender() == edge.getSender() && e.getReceiver() == edge.getReceiver()) abCount++;
+            if (e.getSender() == edge.getReceiver() && e.getReceiver() == edge.getSender()) baCount++;
+        }
+        if (abCount >= burstCount && baCount >= burstCount) {
+            String a = edge.getSender().getId();
+            String b = edge.getReceiver().getId();
+            String msg = String.format("Rapid ping-pong transfers between %s and %s (>=%d each)", a, b, burstCount);
+            graph.emitAlert(AlertType.RAPID_TX, msg, 0.6, List.of(a, b));
+            edge.getSender().updateRisk(0.03);
+            edge.getReceiver().updateRisk(0.03);
+        }
+    }
+}
+
+===== Class: DynamicGraph.java =====
+package com.oops.aml.engine;
+
+import com.oops.aml.engine.alerts.Alert;
+import com.oops.aml.engine.alerts.AlertSink;
+import com.oops.aml.engine.alerts.AlertType;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public class DynamicGraph {
+    private final Map<String, AccountNode> nodes = new HashMap<>();
+    private final List<TransactionEdge> edges = new ArrayList<>();
+    private final List<GraphObserver> observers = new CopyOnWriteArrayList<>();
+    private final List<OnEdgeAddedListener> edgeListeners = new CopyOnWriteArrayList<>();
+    private AlertSink alertSink;
+
+    public interface OnEdgeAddedListener {
+        void edgeAdded(TransactionEdge edge);
+    }
+
+    public void setAlertSink(AlertSink sink) {
+        this.alertSink = sink;
+    }
+
+    public AlertSink getAlertSink() {
+        return alertSink;
+    }
+
+    public AccountNode getOrCreate(String id) {
+        return nodes.computeIfAbsent(id, AccountNode::new);
+    }
+
+    public void addTransaction(String fromId, String toId, double amount) {
+        addTransaction(fromId, toId, amount, LocalDateTime.now());
+    }
+
+    public void addTransaction(String fromId, String toId, double amount, LocalDateTime ts) {
+        AccountNode from = getOrCreate(fromId);
+        AccountNode to = getOrCreate(toId);
+        TransactionEdge edge = new TransactionEdge(from, to, amount, ts, Collections.emptyMap());
+        edges.add(edge);
+        from.getOutgoingEdges().add(edge);
+        to.getIncomingEdges().add(edge);
+
+        // Light baseline risk bump for activity (UI color mapping uses this)
+        from.updateRisk(0.005);
+        to.updateRisk(0.005);
+
+        // Notify observers
+        for (GraphObserver obs : observers) {
+            obs.onTransactionAdded(edge, this);
+        }
+
+        // Notify listeners (e.g., UI graph view)
+        for (OnEdgeAddedListener l : edgeListeners) {
+            l.edgeAdded(edge);
+        }
+    }
+
+    public void registerObserver(GraphObserver observer) {
+        observers.add(observer);
+    }
+
+    public void unregisterObserver(GraphObserver observer) {
+        observers.remove(observer);
+    }
+
+    public void addEdgeListener(OnEdgeAddedListener listener) {
+        edgeListeners.add(listener);
+    }
+
+    public List<TransactionEdge> getRecentEdges(Duration window) {
+        LocalDateTime cutoff = LocalDateTime.now().minus(window);
+        List<TransactionEdge> recent = new ArrayList<>();
+        for (int i = edges.size() - 1; i >= 0; i--) {
+            TransactionEdge e = edges.get(i);
+            if (e.getTimestamp().isBefore(cutoff)) break;
+            recent.add(e);
+        }
+        return recent;
+    }
+
+    public Collection<AccountNode> getNodes() {
+        return nodes.values();
+    }
+
+    public List<TransactionEdge> getEdges() {
+        return edges;
+    }
+
+    // Utility for detectors to emit alerts
+    public void emitAlert(AlertType type, String message, double severity, List<String> accounts) {
+        if (alertSink != null) {
+            alertSink.emit(new Alert(type, message, severity, accounts));
+        }
+    }
+}
+
+===== Class: AlertSink.java =====
+package com.oops.aml.engine.alerts;
+
+public interface AlertSink {
+    void emit(Alert alert);
+}
+
+===== Class: Alert.java =====
+package com.oops.aml.engine.alerts;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+public class Alert {
+    private final AlertType type;
+    private final String message;
+    private final LocalDateTime timestamp;
+    private final double severity;
+    private final List<String> involvedAccounts;
+
+    public Alert(AlertType type, String message, double severity, List<String> involvedAccounts) {
+        this.type = type;
+        this.message = message;
+        this.severity = severity;
+        this.involvedAccounts = involvedAccounts;
+        this.timestamp = LocalDateTime.now();
+    }
+
+    public AlertType getType() {
+        return type;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public LocalDateTime getTimestamp() {
+        return timestamp;
+    }
+
+    public double getSeverity() {
+        return severity;
+    }
+
+    public List<String> getInvolvedAccounts() {
+        return involvedAccounts;
+    }
+}
+
+===== Class: AlertType.java =====
+package com.oops.aml.engine.alerts;
+
+public enum AlertType {
+    CIRCULAR_FLOW,
+    RAPID_TX,
+    NOVEL_PATTERN
+}
+
+===== Class: GraphObserver.java =====
+package com.oops.aml.engine;
+
+public interface GraphObserver {
+    void onTransactionAdded(TransactionEdge edge, DynamicGraph graph);
+}
+
+===== Class: TransactionEdge.java =====
+package com.oops.aml.engine;
+
+import java.time.LocalDateTime;
+import java.util.Map;
+
+public class TransactionEdge {
+    private final AccountNode sender;
+    private final AccountNode receiver;
+    private final double amount;
+    private final LocalDateTime timestamp;
+    private final Map<String, String> meta;
+
+    public TransactionEdge(AccountNode sender, AccountNode receiver, double amount, LocalDateTime timestamp, Map<String, String> meta) {
+        this.sender = sender;
+        this.receiver = receiver;
+        this.amount = amount;
+        this.timestamp = timestamp;
+        this.meta = meta;
+    }
+
+    public AccountNode getSender() {
+        return sender;
+    }
+
+    public AccountNode getReceiver() {
+        return receiver;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public LocalDateTime getTimestamp() {
+        return timestamp;
+    }
+
+    public Map<String, String> getMeta() {
+        return meta;
+    }
+
+    @Override
+    public String toString() {
+        return "TX{" + sender.getId() + "->" + receiver.getId() + ", $" + amount + ", " + timestamp + "}";
+    }
+}
+
+===== Class: AccountNode.java =====
+package com.oops.aml.engine;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class AccountNode {
+    private final String id;
+    private double riskScore = 0.0;
+    private final List<TransactionEdge> outgoingEdges = new ArrayList<>();
+    private final List<TransactionEdge> incomingEdges = new ArrayList<>();
+
+    public AccountNode(String id) {
+        this.id = id;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public double getRiskScore() {
+        return riskScore;
+    }
+
+    public void updateRisk(double delta) {
+        riskScore = Math.max(0.0, Math.min(1.0, riskScore + delta));
+    }
+
+    public List<TransactionEdge> getOutgoingEdges() {
+        return outgoingEdges;
+    }
+
+    public List<TransactionEdge> getIncomingEdges() {
+        return incomingEdges;
+    }
+
+    public List<AccountNode> getConnections() {
+        List<AccountNode> neighbors = new ArrayList<>();
+        for (TransactionEdge e : outgoingEdges) {
+            neighbors.add(e.getReceiver());
+        }
+        for (TransactionEdge e : incomingEdges) {
+            neighbors.add(e.getSender());
+        }
+        return neighbors;
+    }
+}
+
+===== Trigger Conditions =====
+// Rapid back-and-forth detection thresholds and alert trigger
+List<TransactionEdge> recent = graph.getRecentEdges(window);
+int abCount = 0;
+int baCount = 0;
+for (TransactionEdge e : recent) {
+    if (e.getAmount() < minAmount) continue;
+    if (e.getSender() == edge.getSender() && e.getReceiver() == edge.getReceiver()) abCount++;
+    if (e.getSender() == edge.getReceiver() && e.getReceiver() == edge.getSender()) baCount++;
+}
+if (abCount >= burstCount && baCount >= burstCount) {
+    String a = edge.getSender().getId();
+    String b = edge.getReceiver().getId();
+    String msg = String.format("Rapid ping-pong transfers between %s and %s (>=%d each)", a, b, burstCount);
+    graph.emitAlert(AlertType.RAPID_TX, msg, 0.6, List.of(a, b));
+    edge.getSender().updateRisk(0.03);
+    edge.getReceiver().updateRisk(0.03);
+}
+
+// Time window check for recent edges
+public List<TransactionEdge> getRecentEdges(Duration window) {
+    LocalDateTime cutoff = LocalDateTime.now().minus(window);
+    List<TransactionEdge> recent = new ArrayList<>();
+    for (int i = edges.size() - 1; i >= 0; i--) {
+        TransactionEdge e = edges.get(i);
+        if (e.getTimestamp().isBefore(cutoff)) break;
+        recent.add(e);
+    }
+    return recent;
+}
+
+// Simulator pattern injection thresholds and loops
+if (random.nextDouble() < 0.05) {
+    String a = pickAccount();
+    String b = pickAccountDifferent(a);
+    double amt = 800 + random.nextDouble() * 2000;
+    for (int i = 0; i < 3; i++) {
+        graph.addTransaction(a, b, amt);
+        graph.addTransaction(b, a, amt);
+    }
+}
+
+===== Data Flow Summary (from code) =====
+Simulator emits periodic transfers (tick). Each transfer calls
+`DynamicGraph.addTransaction(fromId, toId, amount[, ts])`, which creates a
+`TransactionEdge`, updates node adjacency, nudges risk, and notifies observers
+and UI listeners. `RapidTransactionDetector.onTransactionAdded(...)` inspects
+`graph.getRecentEdges(window)`, applies amount and repeat thresholds in both
+directions, and when conditions are met, calls `graph.emitAlert(...)`. The
+`AlertSink` implementation (`AlertsPanel`) receives alerts, formats a string,
+and appends it to the UI list. `GraphView` listens for new edges and repaints
+the visualization.
+
+===== Sample Output / Console Logs =====
+[RAPID_TX] Rapid ping-pong transfers between A1001 and A1002 (>=2 each) | sev=0.60
+[RAPID_TX] Rapid ping-pong transfers between A1045 and A1079 (>=2 each) | sev=0.60
+[RAPID_TX] Rapid ping-pong transfers between A1010 and A1011 (>=2 each) | sev=0.60

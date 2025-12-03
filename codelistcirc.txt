@@ -1,0 +1,155 @@
+===== CircularFlowDetector.java (full) =====
+package com.oops.aml.observers;
+
+import com.oops.aml.engine.*;
+import com.oops.aml.engine.alerts.AlertType;
+
+import java.time.Duration;
+import java.util.*;
+
+/**
+ * Detects simple circular transaction patterns when a new edge A->B arrives.
+ * Looks for cycles of length 3 (A->B->C->A) or 4 (A->B->C->D->A)
+ * within a recent, configurable time window using a depth-limited DFS.
+ */
+public class CircularFlowDetector implements GraphObserver {
+    private final Duration window;
+
+    /** max steps from receiver back to sender (2 => up to 3 or 4 nodes) */
+    private static final int MAX_DEPTH = 2;
+
+    public CircularFlowDetector(Duration window) {
+        this.window = window;
+    }
+
+    @Override
+    public void onTransactionAdded(TransactionEdge edge, DynamicGraph graph) {
+        AccountNode sender = edge.getSender();   // A
+        AccountNode receiver = edge.getReceiver(); // B
+
+        // Build adjacency from recent edges only
+        List<TransactionEdge> recent = graph.getRecentEdges(window);
+        Map<AccountNode, List<AccountNode>> out = new HashMap<>();
+        for (TransactionEdge e : recent) {
+            out.computeIfAbsent(e.getSender(), k -> new ArrayList<>()).add(e.getReceiver());
+        }
+
+        // Depth-limited DFS from B trying to reach A
+        List<AccountNode> path = new ArrayList<>();
+        Set<AccountNode> visited = new HashSet<>();
+        visited.add(receiver);
+        path.add(receiver);
+
+        List<AccountNode> cycleNodes = new ArrayList<>(); // [A,B,C] or [A,B,C,D]
+        boolean found = dfs(receiver, sender, out, 0, visited, path, cycleNodes);
+        if (!found) return;
+
+        // Determine severity based on cycle size
+        double severity;
+        if (cycleNodes.size() == 3) {
+            severity = 0.9; // HIGH
+        } else {
+            severity = 0.6; // MEDIUM
+        }
+
+        // Message includes the node IDs in the cycle (excluding the closing A at the end)
+        String msg;
+        if (cycleNodes.size() == 3) {
+            msg = String.format("Circular transaction pattern detected between %s, %s, %s",
+                    cycleNodes.get(0).getId(), cycleNodes.get(1).getId(), cycleNodes.get(2).getId());
+        } else {
+            msg = String.format("Circular transaction pattern detected between %s, %s, %s, %s",
+                    cycleNodes.get(0).getId(), cycleNodes.get(1).getId(), cycleNodes.get(2).getId(), cycleNodes.get(3).getId());
+        }
+
+        // Publish alert via graph
+        List<String> accounts = new ArrayList<>();
+        for (AccountNode n : cycleNodes) accounts.add(n.getId());
+        graph.emitAlert(AlertType.CIRCULAR_FLOW, msg, severity, accounts);
+
+        // Nudge risk for all nodes in the cycle
+        double delta = cycleNodes.size() == 3 ? 0.04 : 0.025;
+        for (AccountNode n : cycleNodes) {
+            n.updateRisk(delta);
+        }
+    }
+
+    /**
+     * DFS from current towards target with depth limit. When a neighbor equals target,
+     * and depth >= 1 (i.e., at least one intermediate), we record a cycle.
+     * cycleNodes result is ordered as [A, B, C] or [A, B, C, D].
+     */
+    private boolean dfs(AccountNode current,
+                        AccountNode target,
+                        Map<AccountNode, List<AccountNode>> out,
+                        int depth,
+                        Set<AccountNode> visited,
+                        List<AccountNode> path,
+                        List<AccountNode> cycleNodes) {
+        List<AccountNode> neighbors = out.getOrDefault(current, Collections.emptyList());
+        // Check direct return to target at any step after the first hop
+        for (AccountNode nb : neighbors) {
+            if (nb == target && depth >= 1) {
+                // Compose cycle nodes: [A] + path
+                cycleNodes.clear();
+                cycleNodes.add(target);
+                cycleNodes.addAll(path);
+                return true;
+            }
+        }
+
+        if (depth == MAX_DEPTH) return false; // stop exploring deeper
+
+        for (AccountNode nb : neighbors) {
+            if (nb == target) continue; // handled above; require at least one intermediate
+            if (visited.contains(nb)) continue;
+            visited.add(nb);
+            path.add(nb);
+            if (dfs(nb, target, out, depth + 1, visited, path, cycleNodes)) return true;
+            path.remove(path.size() - 1);
+            visited.remove(nb);
+        }
+        return false;
+    }
+}
+
+===== App.java (modified parts) =====
+import com.oops.aml.observers.CircularFlowDetector;
+import java.time.Duration;
+
+// Register circular flow detector by default and wire it to controls
+CircularFlowDetector circular = new CircularFlowDetector(Duration.ofSeconds(60));
+graph.registerObserver(circular);
+controls.setCircularDetector(circular);
+
+===== ControlsPane.java (modified parts) =====
+import com.oops.aml.observers.CircularFlowDetector;
+
+private CircularFlowDetector circularDetector;
+
+private JCheckBox cbRapid;
+private JCheckBox cbCircular;
+
+public void setCircularDetector(CircularFlowDetector detector) {
+    this.circularDetector = detector;
+    if (cbCircular != null) {
+        cbCircular.setSelected(detector != null);
+    }
+}
+
+cbRapid = new JCheckBox("Enable rapid tx detector", true);
+cbCircular = new JCheckBox("Enable circular flow detector", true);
+
+cbCircular.addChangeListener(e -> {
+    boolean enabled = cbCircular.isSelected();
+    if (enabled) {
+        if (circularDetector == null) {
+            circularDetector = new CircularFlowDetector(Duration.ofSeconds(60));
+        }
+        graph.registerObserver(circularDetector);
+    } else if (circularDetector != null) {
+        graph.unregisterObserver(circularDetector);
+    }
+});
+
+add(new JLabel("Detectors"));
