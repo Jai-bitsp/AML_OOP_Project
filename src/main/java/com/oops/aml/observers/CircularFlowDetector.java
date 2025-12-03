@@ -6,15 +6,11 @@ import com.oops.aml.engine.alerts.AlertType;
 import java.time.Duration;
 import java.util.*;
 
-/**
- * Detects simple circular transaction patterns when a new edge A->B arrives.
- * Looks for cycles of length 3 (A->B->C->A) or 4 (A->B->C->D->A)
- * within a recent, configurable time window using a depth-limited DFS.
- */
+
 public class CircularFlowDetector implements GraphObserver {
     private final Duration window;
 
-    /** max steps from receiver back to sender (2 => up to 3 or 4 nodes) */
+    
     private static final int MAX_DEPTH = 2;
 
     public CircularFlowDetector(Duration window) {

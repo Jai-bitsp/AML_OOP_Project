@@ -1,8 +1,6 @@
 package com.oops.aml.ui;
-
 import com.oops.aml.engine.alerts.Alert;
 import com.oops.aml.engine.alerts.AlertSink;
-
 import javax.swing.*;
 import java.awt.*;
 
