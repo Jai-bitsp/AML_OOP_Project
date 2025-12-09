@@ -15,7 +15,7 @@ A simplified, class‑friendly MVP that demonstrates real‑time graph modeling 
 
 ## Architecture
 - Core engine (`AccountNode`, `TransactionEdge`, `DynamicGraph`).
-- Observer interface (`GraphObserver`) and detector (`RapidTransactionDetector`).
+- Observer interface (`GraphObserver`), detectors (`RapidTransactionDetector`) and (`CircularFlowDetector`) .
 - Stream (`TransactionStreamSimulator`).
 - UI (`GraphView` Swing panel, `AlertsPanel` Swing panel, `ControlsPane`, `StatsPane`).
 
@@ -45,6 +45,7 @@ src/main/java/
   observers/
     GraphObserver.java
     RapidTransactionDetector.java
+    CircularFlowDetector.java
   stream/
     TransactionStreamSimulator.java
   ui/
